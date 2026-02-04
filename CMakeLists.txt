@@ -368,8 +368,8 @@ install(FILES ${CMAKE_BINARY_DIR}/libzsh-config.cmake
 )
 
 # Tests
-option(BUILD_TESTS "Build tests" ON)
-if(BUILD_TESTS)
+option(LIBZSH_BUILD_TESTS "Build tests" ON)
+if(LIBZSH_BUILD_TESTS)
     enable_testing()
 
     add_executable(test_libzsh tests/test_main.c)
@@ -384,8 +384,8 @@ if(BUILD_TESTS)
 endif()
 
 # Examples
-option(BUILD_EXAMPLES "Build examples" ON)
-if(BUILD_EXAMPLES)
+option(LIBZSH_BUILD_EXAMPLES "Build examples" ON)
+if(LIBZSH_BUILD_EXAMPLES)
     add_executable(zle_interactive examples/zle_interactive.c)
     target_link_libraries(zle_interactive PRIVATE zsh)
 endif()
