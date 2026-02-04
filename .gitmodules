@@ -1,0 +1,3 @@
+[submodule "3rdparty/zsh"]
+	path = 3rdparty/zsh
+	url = git://git.code.sf.net/p/zsh/code

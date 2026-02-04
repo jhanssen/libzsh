@@ -1,0 +1,24 @@
+# Build directories
+build/
+cmake-build-*/
+
+# Generated files
+*.o
+*.a
+*.so
+*.dylib
+
+# Editor/IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Compilation database
+compile_commands.json
+
+# Test artifacts
+Testing/
+CTestTestfile.cmake
