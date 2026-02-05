@@ -9,6 +9,8 @@
  * - Character insertion
  * - Backspace/Delete
  * - Arrow keys for cursor movement
+ * - Up/Down for history navigation
+ * - Ctrl+R for reverse history search
  * - Ctrl+A/E for beginning/end of line
  * - Ctrl+K to kill to end of line
  * - Ctrl+U to kill entire line
@@ -57,6 +59,51 @@ extern void backdel(int ct, int flags);
 /* Terminal state */
 static struct termios orig_termios;
 static int raw_mode = 0;
+
+/* History */
+#define HISTORY_MAX 100
+static char *history[HISTORY_MAX];
+static int history_count = 0;
+static int history_pos = 0;
+static char *saved_line = NULL;  /* saves current line when browsing history */
+
+static void history_add(const char *line)
+{
+    if (!line || !*line)
+        return;
+
+    /* Don't add duplicates of the last entry */
+    if (history_count > 0 && strcmp(history[history_count - 1], line) == 0)
+        return;
+
+    if (history_count >= HISTORY_MAX) {
+        /* Remove oldest entry */
+        free(history[0]);
+        memmove(history, history + 1, (HISTORY_MAX - 1) * sizeof(char *));
+        history_count--;
+    }
+
+    history[history_count++] = strdup(line);
+}
+
+static void set_line_from_string(const char *s)
+{
+    /* Clear current line */
+    zlell = 0;
+    zlecs = 0;
+
+    if (s && *s) {
+        /* Copy string to zleline */
+        size_t len = strlen(s);
+        sizeline(len + 1);
+        for (size_t i = 0; i < len; i++) {
+            zleline[i] = (ZLE_CHAR_T)s[i];
+        }
+        zlell = len;
+        zlecs = len;  /* cursor at end */
+    }
+    zleline[zlell] = ZWC('\0');
+}
 
 static void disable_raw_mode(void)
 {
@@ -167,6 +214,69 @@ static void insert_char(int c)
     zlecs++;
 }
 
+/* Reverse incremental search */
+static int reverse_search(const char *prompt)
+{
+    char search_buf[256] = {0};
+    int search_len = 0;
+    int search_pos = history_count;  /* start from most recent */
+    int found_pos = -1;
+
+    while (1) {
+        /* Display search prompt */
+        printf("\r\033[K(reverse-i-search)`%s': ", search_buf);
+
+        /* Show matching history entry if found */
+        if (found_pos >= 0 && found_pos < history_count) {
+            printf("%s", history[found_pos]);
+        }
+        fflush(stdout);
+
+        int c = getchar();
+        if (c == EOF)
+            return -1;
+
+        if (c == '\r' || c == '\n') {
+            /* Accept the found entry */
+            if (found_pos >= 0) {
+                set_line_from_string(history[found_pos]);
+            }
+            printf("\r\n");
+            refresh_line(prompt);
+            return 0;
+        } else if (c == 7 || c == 27) {  /* Ctrl+G or Escape - cancel */
+            refresh_line(prompt);
+            return 0;
+        } else if (c == 18) {  /* Ctrl+R - search backwards more */
+            if (found_pos > 0) {
+                search_pos = found_pos;
+            }
+        } else if (c == 127 || c == 8) {  /* Backspace */
+            if (search_len > 0) {
+                search_buf[--search_len] = '\0';
+                search_pos = history_count;  /* restart search */
+            }
+        } else if (c >= 32 && c < 127) {
+            /* Add to search string */
+            if (search_len < (int)sizeof(search_buf) - 1) {
+                search_buf[search_len++] = c;
+                search_buf[search_len] = '\0';
+            }
+        } else {
+            continue;
+        }
+
+        /* Search backwards for match */
+        found_pos = -1;
+        for (int i = search_pos - 1; i >= 0; i--) {
+            if (strstr(history[i], search_buf) != NULL) {
+                found_pos = i;
+                break;
+            }
+        }
+    }
+}
+
 /* Read a line interactively using ZLE */
 static char *readline_zle(const char *prompt)
 {
@@ -178,6 +288,11 @@ static char *readline_zle(const char *prompt)
     zlell = 0;
     zlecs = 0;
     zleline[0] = ZWC('\0');
+
+    /* Reset history position */
+    history_pos = history_count;
+    free(saved_line);
+    saved_line = NULL;
 
     printf("%s", prompt);
     fflush(stdout);
@@ -229,6 +344,11 @@ static char *readline_zle(const char *prompt)
             }
             break;
 
+        case 18:  /* Ctrl+R - reverse search */
+            if (reverse_search(prompt) < 0)
+                return NULL;
+            break;
+
         case 21:  /* Ctrl+U - kill whole line */
             if (zlell > 0) {
                 zlecs = 0;
@@ -254,8 +374,31 @@ static char *readline_zle(const char *prompt)
                 if (c == EOF)
                     return NULL;
                 switch (c) {
-                case 'A':  /* Up arrow - ignored for now */
-                case 'B':  /* Down arrow - ignored for now */
+                case 'A':  /* Up arrow - previous history */
+                    if (history_pos > 0) {
+                        /* Save current line if at the end */
+                        if (history_pos == history_count) {
+                            free(saved_line);
+                            int outll, outcs;
+                            char *cur = zlelineasstring(zleline, zlell, zlecs, &outll, &outcs, 1);
+                            saved_line = strdup(cur);
+                        }
+                        history_pos--;
+                        set_line_from_string(history[history_pos]);
+                        refresh_line(prompt);
+                    }
+                    break;
+                case 'B':  /* Down arrow - next history */
+                    if (history_pos < history_count) {
+                        history_pos++;
+                        if (history_pos == history_count) {
+                            /* Restore saved line */
+                            set_line_from_string(saved_line);
+                        } else {
+                            set_line_from_string(history[history_pos]);
+                        }
+                        refresh_line(prompt);
+                    }
                     break;
                 case 'C':  /* Right arrow */
                     if (zlecs < zlell) {
@@ -313,6 +456,8 @@ int main(int argc, char *argv[])
     printf("ZLE Interactive Line Editor Example\n");
     printf("====================================\n\n");
     printf("Keys:\n");
+    printf("  Up/Down     History navigation\n");
+    printf("  Ctrl+R      Reverse history search\n");
     printf("  Ctrl+A      Beginning of line\n");
     printf("  Ctrl+E      End of line\n");
     printf("  Ctrl+K      Kill to end of line\n");
@@ -332,6 +477,9 @@ int main(int argc, char *argv[])
         disable_raw_mode();  /* Temporarily for output */
 
         if (strlen(line) > 0) {
+            /* Add to history */
+            history_add(line);
+
             printf("You entered: \"%s\"\n", line);
 
             /* Demo: parse the input */
@@ -366,5 +514,12 @@ int main(int argc, char *argv[])
 
     disable_raw_mode();
     printf("\nGoodbye!\n");
+
+    /* Cleanup history */
+    for (int i = 0; i < history_count; i++) {
+        free(history[i]);
+    }
+    free(saved_line);
+
     return 0;
 }
