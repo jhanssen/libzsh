@@ -279,12 +279,17 @@ find_library(TINFO_LIB tinfo)
 find_library(DL_LIB dl)
 find_library(M_LIB m)
 find_library(RT_LIB rt)
+find_library(ICONV_LIB iconv)
 
 target_link_libraries(zsh PUBLIC
     ${NCURSES_LIB}
     ${DL_LIB}
     ${M_LIB}
 )
+
+if(ICONV_LIB)
+    target_link_libraries(zsh PUBLIC ${ICONV_LIB})
+endif()
 
 if(TINFO_LIB)
     target_link_libraries(zsh PUBLIC ${TINFO_LIB})
